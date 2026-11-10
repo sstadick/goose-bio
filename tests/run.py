@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-# lapper and bed are unfinished modules; their tests keep them compiling.
+# bed is an unfinished module; its test keeps it compiling.
 SUITES = ("radix_sort", "iitree", "fastx", "lapper", "bed")
 
 

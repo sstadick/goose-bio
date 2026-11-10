@@ -13,10 +13,16 @@
 - [`iitree::add`](#api-9)
 - [`iitree::index`](#api-10)
 - [`iitree::overlap`](#api-11)
-- [`fastx::Stream`](#api-12)
-- [`fastx::Status`](#api-13)
-- [`fastx::Reader`](#api-14)
-- [`fastx::read`](#api-15)
+- [`lapper::Interval`](#api-12)
+- [`lapper::overlap`](#api-13)
+- [`lapper::overlap`](#api-14)
+- [`lapper::Lapper`](#api-15)
+- [`lapper::new_lapper`](#api-16)
+- [`lapper::find`](#api-17)
+- [`fastx::Stream`](#api-18)
+- [`fastx::Status`](#api-19)
+- [`fastx::Reader`](#api-20)
+- [`fastx::read`](#api-21)
 
 <a id="api-1"></a>
 
@@ -295,6 +301,175 @@ assert(values == expected);
 
 <a id="api-12"></a>
 
+## `lapper::Interval`
+
+[source](lapper.goose#L33-L40)
+
+```goose
+struct Interval<T, V> {
+    // 0-based inclusive start
+    start: T,
+    // 0-based exclusive end
+    stop: T,
+    // A stored value.
+    val: V,
+}
+```
+
+A half-open interval `start..stop` carrying a value. T is an integer type.
+
+```goose
+let exon = lapper::Interval<i32, u8> { 10, 20, 'a' };
+assert(exon.start == 10 && exon.stop == 20 && exon.val == 'a');
+```
+
+<a id="api-13"></a>
+
+## `lapper::overlap`
+
+[source](lapper.goose#L51-L53)
+
+```goose
+inline fn overlap<T, V>(a: Interval<T, V>&, b: Interval<T, V>&) -> bool
+```
+
+Whether a and b share a position. Intervals that only touch do not overlap.
+
+```goose
+let a = lapper::Interval<i32, u8> { 10, 20, 'a' };
+let b = lapper::Interval<i32, u8> { 19, 30, 'b' };
+let c = lapper::Interval<i32, u8> { 20, 30, 'c' };
+assert(lapper::overlap(a, b));
+assert(!lapper::overlap(a, c));
+```
+
+<a id="api-14"></a>
+
+## `lapper::overlap`
+
+[source](lapper.goose#L62-L64)
+
+```goose
+inline fn overlap<T, V>(a: Interval<T, V>&, b_start: T, b_stop: T) -> bool
+```
+
+Whether a shares a position with `b_start..b_stop`.
+
+```goose
+let a = lapper::Interval<i32, u8> { 10, 20, 'a' };
+assert(lapper::overlap(a, 19, 30));
+assert(!lapper::overlap(a, 0, 10));
+```
+
+<a id="api-15"></a>
+
+## `lapper::Lapper`
+
+[source](lapper.goose#L88-L103)
+
+```goose
+struct Lapper<T, V> {
+    // The intervals by start, then stop. Block b is intervals[b * BLOCK..(b + 1) * BLOCK].
+    intervals:   Interval<T, V>[:],
+    // The start and stop of every interval, padded to whole blocks.
+    starts:      T[:],
+    stops:       T[:],
+    // Each block's first start, its smallest stop, and the largest stop of
+    // the blocks up to and including it.
+    block_start: T[:],
+    block_min:   T[:],
+    prefix_max:  T[:],
+    // A binary tree of the blocks' largest stops with leaves leaves: node i
+    // has the children 2 * i and 2 * i + 1, and block b is node leaves + b.
+    tree:        T[:],
+    leaves:      i64,
+}
+```
+
+One sequence's intervals, sorted and indexed for `find`. Make one with
+`new_lapper`. Its fields are slices of the two arrays passed to
+`new_lapper`, so a Lapper is a plain value: keep one per chromosome in an
+array, and keep both arrays alive and their intervals unchanged while it
+is in use. Everything but intervals is the index.
+
+```goose
+let chr1: lapper::Interval<i32, u8>[>..] = [
+    lapper::Interval<i32, u8> { 0, 10, 'a' },
+    lapper::Interval<i32, u8> { 5, 15, 'b' },
+];
+let chr2: lapper::Interval<i32, u8>[>..] = [lapper::Interval<i32, u8> { 100, 110, 'c' }];
+var index: i32[>..] = [];
+var lappers: lapper::Lapper<i32, u8>[>..] = [];
+lappers.push(lapper::new_lapper(chr1, index));
+lappers.push(lapper::new_lapper(chr2, index));
+
+var found: u8[>..] = [];
+lappers[0].find(7, 9) { interval => found.push(interval.val); };
+lappers[1].find(105, 106) { interval => found.push(interval.val); };
+assert(found == "abc");
+```
+
+<a id="api-16"></a>
+
+## `lapper::new_lapper`
+
+[source](lapper.goose#L138-L192)
+
+```goose
+fn new_lapper<T, V>(intervals: Interval<T, V>[:], index: T[>..]&) -> Lapper<T, V>
+```
+
+Sort intervals in place by start, then stop, and index them. The index is
+appended to index, 2 T per interval plus 5 T per block of 32; the result
+holds slices of both arguments. One index array can serve any number of
+Lappers. Intervals that are already in order are not sorted again.
+
+```goose
+let intervals: lapper::Interval<i32, u8>[>..] = [
+    lapper::Interval<i32, u8> { 20, 30, 'c' },
+    lapper::Interval<i32, u8> { 0, 10, 'b' },
+    lapper::Interval<i32, u8> { 0, 5, 'a' },
+];
+var index: i32[>..] = [];
+let sorted = lapper::new_lapper(intervals, index);
+assert(sorted.intervals.len == 3 && index.len > 0);
+assert(intervals[0].val == 'a' && intervals[1].val == 'b' && intervals[2].val == 'c');
+```
+
+<a id="api-17"></a>
+
+## `lapper::find`
+
+[source](lapper.goose#L287-L314)
+
+```goose
+fn find<T, V, F: fn(Interval<T, V>&)>(lapper: Lapper<T, V>&, start: T, stop: T)
+```
+
+Call F with every interval that overlaps `start..stop`, ordered by start,
+then stop.
+
+```goose
+let intervals: lapper::Interval<i32, u8>[>..] = [
+    lapper::Interval<i32, u8> { 0, 10, 'a' },
+    lapper::Interval<i32, u8> { 8, 12, 'b' },
+    lapper::Interval<i32, u8> { 20, 30, 'c' },
+    lapper::Interval<i32, u8> { 30, 40, 'd' },
+];
+var index: i32[>..] = [];
+let exons = lapper::new_lapper(intervals, index);
+
+var found: u8[>..] = [];
+exons.find(9, 25) { interval => found.push(interval.val); };
+assert(found == "abc");
+
+found.clear();
+exons.find(12, 20) { interval => found.push(interval.val); };
+assert(found.len == 0);
+```
+
+<a id="api-18"></a>
+
 ## `fastx::Stream`
 
 [source](fastx.goose#L31-L38)
@@ -323,7 +498,7 @@ assert(reader.read() == fastx::Status.Record);
 assert(!reader.stream.failed);
 ```
 
-<a id="api-13"></a>
+<a id="api-19"></a>
 
 ## `fastx::Status`
 
@@ -357,7 +532,7 @@ while status == fastx::Status.Record {
 assert(records == 2 && status == fastx::Status.End);
 ```
 
-<a id="api-14"></a>
+<a id="api-20"></a>
 
 ## `fastx::Reader`
 
@@ -391,7 +566,7 @@ assert(reader.name == "read1" && reader.comment == "first read");
 assert(reader.seq == "ACGTACGT" && reader.qual == "IIIIHHHH");
 ```
 
-<a id="api-15"></a>
+<a id="api-21"></a>
 
 ## `fastx::read`
 

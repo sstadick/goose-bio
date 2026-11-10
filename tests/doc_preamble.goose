@@ -7,6 +7,7 @@ import simd_bytes from "github.com/sstadick/goose-simd@v0.2.0";
 import bio from "..";
 import bio.radix_sort;
 import bio.iitree;
+import bio.lapper;
 import bio.fastx;
 
 checkfree fn low_byte(value: u16) -> u16 { value & 0xFF }

@@ -57,7 +57,8 @@ fn lapper(options: Options&) {
             record.start, record.stop, 0 as i32,
         });
     };
-    let lapper = lapper::new_lapper(intervals);
+    var index: i32[>..] = [];
+    let lapper = lapper::new_lapper(intervals, index);
 
     bed::read_bedfile(options.side_b.value, chr_map) { record, rest =>
         // TODO: don't really need to do the mapping here

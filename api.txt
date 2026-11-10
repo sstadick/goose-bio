@@ -7,6 +7,11 @@ iitree::add_contig
 iitree::add
 iitree::index
 iitree::overlap
+lapper::Interval
+lapper::overlap
+lapper::Lapper
+lapper::new_lapper
+lapper::find
 fastx::Stream
 fastx::Status
 fastx::Reader

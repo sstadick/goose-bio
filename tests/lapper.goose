@@ -18,16 +18,16 @@ fn test_overlap() {
     assert(!lapper::overlap(a, 20, 30));
 }
 
-fn test_new_lapper_sorts_and_tracks_longest() {
+fn test_new_lapper_sorts_by_start_then_stop() {
     let intervals: lapper::Interval<i64, i64>[>..] = [
         lapper::Interval { 5, 7, 3 },
         lapper::Interval { 0, 5, 0 },
         lapper::Interval { 4, 6, 2 },
         lapper::Interval { 0, 3, 1 },
     ];
-    let index = lapper::new_lapper(intervals);
+    var storage: i64[>..] = [];
+    let index = lapper::new_lapper(intervals, storage);
 
-    assert(index.longest == 5);
     assert(index.intervals.len == 4);
     assert(index.intervals[0].start == 0 && index.intervals[0].stop == 3);
     assert(index.intervals[1].start == 0 && index.intervals[1].stop == 5);
@@ -35,26 +35,32 @@ fn test_new_lapper_sorts_and_tracks_longest() {
     assert(index.intervals[3].start == 5 && index.intervals[3].stop == 7);
 }
 
-fn test_lower_bound() {
-    let intervals: lapper::Interval<i64, i64>[>..] = [
-        lapper::Interval { 0, 3, 0 },
-        lapper::Interval { 2, 3, 1 },
-        lapper::Interval { 4, 6, 2 },
-        lapper::Interval { 5, 7, 3 },
-        lapper::Interval { 9, 11, 4 },
-    ];
+fn test_empty_lapper() {
+    let intervals: lapper::Interval<i64, i64>[>..] = [];
+    var storage: i64[>..] = [];
+    let index = lapper::new_lapper(intervals, storage);
 
-    assert(lapper::lower_bound(-5, intervals) == 0);
-    assert(lapper::lower_bound(0, intervals) == 0);
-    assert(lapper::lower_bound(1, intervals) == 1);
-    assert(lapper::lower_bound(2, intervals) == 1);
-    assert(lapper::lower_bound(4, intervals) == 2);
-    assert(lapper::lower_bound(6, intervals) == 4);
-    assert(lapper::lower_bound(9, intervals) == 4);
-    assert(lapper::lower_bound(10, intervals) == 5);
+    var hits = 0;
+    lapper::find(index, 0, 100) { iv => hits += 1; };
+    assert(hits == 0);
+}
 
-    let empty: lapper::Interval<i64, i64>[>..] = [];
-    assert(lapper::lower_bound(0, empty) == -1);
+// One index array serves several Lappers, which are plain values in an array.
+fn test_lappers_share_index_storage() {
+    let first: lapper::Interval<i64, i64>[>..] = [lapper::Interval { 0, 10, 0 }, lapper::Interval { 5, 15, 1 }];
+    let second: lapper::Interval<i64, i64>[>..] = [lapper::Interval { 100, 110, 2 }];
+    var storage: i64[>..] = [];
+    var lappers: lapper::Lapper<i64, i64>[>..] = [];
+    lappers.push(lapper::new_lapper(first, storage));
+    lappers.push(lapper::new_lapper(second, storage));
+
+    var found: i64[>..] = [];
+    lappers[0].find(7, 105) { iv => found.push(iv.val); };
+    assert(found == [0, 1]);
+
+    found.clear();
+    lappers[1].find(7, 105) { iv => found.push(iv.val); };
+    assert(found == [2]);
 }
 
 fn test_nonoverlapping_boundaries() {
@@ -65,7 +71,8 @@ fn test_nonoverlapping_boundaries() {
         lapper::Interval { 60, 70, 3 },
         lapper::Interval { 80, 90, 4 },
     ];
-    let index = lapper::new_lapper(intervals);
+    var storage: i64[>..] = [];
+    let index = lapper::new_lapper(intervals, storage);
 
     var found: i64[>..] = [];
     lapper::find(index, 15, 20) { iv => found.push(iv.val); };
@@ -90,7 +97,8 @@ fn test_containment_queries() {
         lapper::Interval { 20, 30, 1 },
         lapper::Interval { 40, 50, 2 },
     ];
-    let index = lapper::new_lapper(intervals);
+    var storage: i64[>..] = [];
+    let index = lapper::new_lapper(intervals, storage);
 
     var found: i64[>..] = [];
     lapper::find(index, 22, 27) { iv => found.push(iv.val); };
@@ -112,7 +120,8 @@ fn test_overlapping_intervals() {
         lapper::Interval { 20, 35, 2 },
         lapper::Interval { 30, 45, 3 },
     ];
-    let index = lapper::new_lapper(intervals);
+    var storage: i64[>..] = [];
+    let index = lapper::new_lapper(intervals, storage);
 
     var found: i64[>..] = [];
     lapper::find(index, 8, 20) { iv => found.push(iv.val); };
@@ -139,8 +148,8 @@ fn test_find_behind_first_match() {
         lapper::Interval { 68, 71, 7 },
         lapper::Interval { 70, 75, 8 },
     ];
-    let index = lapper::new_lapper(intervals);
-    assert(index.longest == 50);
+    var storage: i64[>..] = [];
+    let index = lapper::new_lapper(intervals, storage);
 
     var found: i64[>..] = [];
     lapper::find(index, 50, 55) { iv => found.push(iv.val); };
@@ -168,7 +177,8 @@ fn test_find_overlaps_in_large_intervals() {
         lapper::Interval { 111, 160, 12 },
         lapper::Interval { 150, 200, 13 },
     ];
-    let index = lapper::new_lapper(intervals);
+    var storage: i64[>..] = [];
+    let index = lapper::new_lapper(intervals, storage);
 
     var found: i64[>..] = [];
     lapper::find(index, 8, 11) { iv => found.push(iv.val); };
@@ -189,7 +199,8 @@ fn test_long_interval_spanning_short_intervals() {
         lapper::Interval { 27959118, 27959171, 5 },
         lapper::Interval { 28866309, 33141404, 6 },
     ];
-    let index = lapper::new_lapper(intervals);
+    var storage: i64[>..] = [];
+    let index = lapper::new_lapper(intervals, storage);
 
     var found: i64[>..] = [];
     lapper::find(index, 28974798, 33141355) { iv => found.push(iv.val); };
@@ -200,7 +211,8 @@ fn test_single_interval() {
     let intervals: lapper::Interval<i64, i64>[>..] = [
         lapper::Interval { 10, 35, 7 },
     ];
-    let index = lapper::new_lapper(intervals);
+    var storage: i64[>..] = [];
+    let index = lapper::new_lapper(intervals, storage);
 
     var found: i64[>..] = [];
     lapper::find(index, 10, 35) { iv => found.push(iv.val); };
@@ -215,10 +227,104 @@ fn test_single_interval() {
     assert(found.len == 0);
 }
 
+fn next_random(state: u64&) -> u64 {
+    var x = state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    state = x;
+    return x;
+}
+
+fn below(state: u64&, n: i64) -> i64 { (next_random(state) % (n as u64)) as i64 }
+
+// Build count intervals of one shape, shifted by offset, and compare `find`
+// with a scan of every interval for many queries.
+fn check_against_scan<T>(shape: i64, count: i64, offset: i64, state: u64&) {
+    let span = 20 * count + 100;
+    var intervals: lapper::Interval<T, i32>[>..] = [];
+    for i in 0..count {
+        var start = below(state, span);
+        var stop = start + 1 + below(state, 50);
+        if shape == 1 {
+            // Now and then an interval over nearly everything.
+            if below(state, 100) == 0 { start = below(state, 10); stop = span - below(state, 10); }
+        } else if shape == 2 {
+            // Nested: every interval holds all later ones.
+            start = i;
+            stop = 2 * count - i;
+        } else if shape == 3 {
+            // One start, many stops.
+            start = 100;
+            stop = 101 + below(state, span);
+        } else if shape == 4 {
+            // Copies of one interval.
+            start = 100;
+            stop = 200;
+        } else if shape == 5 {
+            // Any length up to everything.
+            stop = start + below(state, span);
+        } else if shape == 6 {
+            // Already sorted by start, with ties and empty intervals.
+            start = 3 * (i / 2);
+            stop = start + below(state, 40);
+        } else if shape == 7 {
+            // Clusters separated by wide gaps.
+            start = (i / 40) * 5000 + below(state, 60);
+            stop = start + 1 + below(state, 30);
+        }
+        intervals.push(lapper::Interval { start: (start + offset) as T, stop: (stop + offset) as T, val: i as i32 });
+    }
+
+    var storage: T[>..] = [];
+    storage.push(default<T>()); // Something ahead of this Lapper's index.
+    let index = lapper::new_lapper(intervals, storage);
+    for i in 1..intervals.len {
+        let a, b = intervals[i - 1], intervals[i];
+        assert(a.start < b.start || (a.start == b.start && a.stop <= b.stop));
+    }
+
+    var found: i32[>..] = [];
+    var expected: i32[>..] = [];
+    for q in 0..60 {
+        var start = below(state, span + 40) - 20;
+        var stop = start + below(state, 60);
+        let kind = q % 5;
+        if kind == 1 { stop = start + below(state, span); }
+        if kind == 2 { start = -20; stop = span + 20; }
+        if kind == 3 { stop = start; }
+        if offset == 0 && start < 0 { stop -= start; start = 0; }
+        let s = (start + offset) as T;
+        let e = (stop + offset) as T;
+        found.clear();
+        expected.clear();
+        index.find(s, e) { iv => found.push(iv.val); };
+        for &iv in intervals {
+            if iv.start < e && iv.stop > s { expected.push(iv.val); }
+        }
+        assert(found == expected);
+    }
+}
+
+// Interval counts on both sides of a block of 32 and of the powers of two
+// that the tree of blocks grows at.
+fn test_find_matches_scan() {
+    var state: u64 = 0x9E3779B97F4A7C15;
+    let counts: i64[] = [1, 2, 31, 32, 33, 63, 64, 65, 96, 97, 128, 129, 1000, 1024, 1025, 2049, 4100];
+    for shape in 0..8 {
+        for count in counts {
+            check_against_scan<i32>(shape, count, -777, state);
+            check_against_scan<u32>(shape, count, 0, state);
+            check_against_scan<i64>(shape, count, -5000000000, state);
+        }
+    }
+}
+
 fn main() {
     test_overlap();
-    test_new_lapper_sorts_and_tracks_longest();
-    test_lower_bound();
+    test_new_lapper_sorts_by_start_then_stop();
+    test_empty_lapper();
+    test_lappers_share_index_storage();
     test_nonoverlapping_boundaries();
     test_containment_queries();
     test_overlapping_intervals();
@@ -226,5 +332,6 @@ fn main() {
     test_find_overlaps_in_large_intervals();
     test_long_interval_spanning_short_intervals();
     test_single_interval();
+    test_find_matches_scan();
     print("lapper tests PASSED");
 }

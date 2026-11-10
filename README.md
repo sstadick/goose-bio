@@ -2,7 +2,8 @@
 
 Bioinformatics data structures and parsers for
 [Goose](https://github.com/aardappel/goose): an implicit interval tree, a
-FASTA and FASTQ reader, and the radix sort the tree is built with.
+block-indexed interval lookup, a FASTA and FASTQ reader, and the radix sort
+both interval structures are built with.
 
 **[API reference and examples](API.md)** · [Benchmarks](bench/BIOFAST.md)
 
@@ -36,6 +37,7 @@ goose build main.goose -O2 -o demo
 | Module | Namespace | Needs |
 | --- | --- | --- |
 | `bio.iitree` | `iitree` | nothing else |
+| `bio.lapper` | `lapper` | nothing else |
 | `bio.radix_sort` | `radix_sort` | nothing else |
 | `bio.fastx` | `fastx` | goose-io, goose-bstr, goose-simd |
 
@@ -51,6 +53,48 @@ contigs that stores nothing beyond its sorted intervals. An `IITree<V>` holds
 `Interval<V> { start, stop, value }`. Add intervals, index once, then pass a
 block to `overlap`, which calls it with each overlapping interval in order of
 start, as in the program above.
+
+## Lapper
+
+`lapper.goose` is a sorted-interval lookup after
+[rust-lapper](https://github.com/sstadick/rust-lapper). A `Lapper<T, V>`
+covers one sequence: `new_lapper` sorts a slice of
+`Interval<T, V> { start, stop, val }` in place, for any integer coordinate
+type `T`, and `find` calls a block with each overlapping interval, ordered by
+start, then stop.
+
+```goose
+import bio from "github.com/sstadick/goose-bio@main";
+import bio.lapper;
+
+fn main() {
+    let exons: lapper::Interval<i32, u8>[>..] = [
+        lapper::Interval<i32, u8> { 20, 30, 'c' },
+        lapper::Interval<i32, u8> { 0, 10, 'a' },
+        lapper::Interval<i32, u8> { 8, 12, 'b' },
+    ];
+    var index: i32[>..] = [];
+    let chr1 = lapper::new_lapper(exons, index);
+
+    var found: u8[>..] = [];
+    chr1.find(9, 25) { interval => found.push(interval.val); };
+    assert(found == "abc");
+}
+```
+
+The index groups the sorted intervals in blocks of 32 and keeps a copy of
+every start and stop, each block's smallest and largest stop, and a binary
+max tree over the blocks. A query binary-searches for the first block that
+can overlap it, tests each block it visits with vector compares, and uses the
+tree to jump over blocks that end before it, so one long interval among short
+ones does not slow queries down.
+
+`new_lapper` appends that index, two coordinates per interval plus five per
+block, to an array the program owns. A `Lapper` only holds slices of the
+intervals and of that array, so one index array can serve a `Lapper` per
+chromosome, kept in an ordinary array. Queries are faster than the interval
+tree's; the tree stores nothing beyond its intervals and looks contigs up by
+name.
 
 ## FASTA and FASTQ
 
@@ -116,12 +160,10 @@ See the [API reference](API.md) for both direct and keyed sorting, and the
 [benchmark against C, Rust, Zig, and Mojo ports](bench/RADIX_SORT.md) for
 methodology and current performance.
 
-## Unfinished modules
+## Unfinished module
 
-`lapper.goose` (a sorted-interval lookup after
-[rust-lapper](https://github.com/sstadick/rust-lapper)) and `bed.goose` (a BED
-reader) are earlier experiments. They are not part of the documented API and
-may change or go away.
+`bed.goose` (a BED reader) is an earlier experiment. It is not part of the
+documented API and may change or go away.
 
 ## Development
 
