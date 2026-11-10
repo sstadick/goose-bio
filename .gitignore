@@ -1,0 +1,6 @@
+/.ci/
+# Local clone of lh3/cgranges, kept for reference.
+/iitree/
+/bench/data/
+/bench/.pixi/
+__pycache__/

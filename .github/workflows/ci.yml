@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: x86_64
+            compilers: gcc clang
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            compilers: gcc clang
+          - os: macos-15
+            arch: arm64
+            compilers: clang
+          - os: windows-2025
+            arch: x86_64
+            compilers: msvc clang-cl
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
+      NATIVE_COMPILERS: ${{ matrix.compilers }}
+    steps:
+      - name: Preserve line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+      - name: Check out Goose
+        uses: actions/checkout@v7
+        with:
+          repository: aardappel/goose
+          # Compiler revision the library and benchmarks were developed with.
+          ref: 74c641c5ac6d762e57e3177678fe9dea414d042a
+          path: .ci/goose
+          persist-credentials: false
+      - name: Build Goose
+        run: |
+          cmake -S .ci/goose -B .ci/goose/build -DCMAKE_BUILD_TYPE=Debug -DGOOSE_BUILTIN_LIBS=
+          cmake --build .ci/goose/build --config Debug --parallel 2
+      - name: Set test environment and check architecture
+        shell: python
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          import os
+          from pathlib import Path
+          import platform
+
+          machine = platform.machine().lower()
+          arch = {'amd64': 'x86_64', 'aarch64': 'arm64'}.get(machine, machine)
+          assert arch == os.environ['EXPECTED_ARCH'], (machine, os.environ['EXPECTED_ARCH'])
+          print(f'Testing {platform.system()} on {arch}')
+          build = Path(os.environ['GITHUB_WORKSPACE']) / '.ci/goose/build'
+          if os.name == 'nt':
+              build /= 'Debug'
+          with open(os.environ['GITHUB_PATH'], 'a', encoding='utf-8') as out:
+              out.write(str(build) + '\n')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as out:
+              out.write('GOOSE_HOME=' + str(Path(os.environ['RUNNER_TEMP']) / 'goose-bio-home') + '\n')
+      # scripts/docs.sh --check and scripts/doctest.sh are not run here yet:
+      # IITree is a root struct, which published goose-doc does not read.
+      - name: TinyCC and native tests
+        run: |
+          read -ra compilers <<< "$NATIVE_COMPILERS"
+          python3 tests/run.py --cc "${compilers[@]}"
