@@ -43,7 +43,7 @@ goose build main.goose -O2 -o demo
 
 The examples follow `main`. For reproducible builds, pin the import to a
 [release](https://github.com/sstadick/goose-bio/releases) tag, as in
-`"github.com/sstadick/goose-bio@v0.1.0"`.
+`"github.com/sstadick/goose-bio@v0.2.0"`.
 
 ## Implicit interval tree
 
