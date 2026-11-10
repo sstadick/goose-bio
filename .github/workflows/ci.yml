@@ -56,6 +56,13 @@ jobs:
           ref: 74c641c5ac6d762e57e3177678fe9dea414d042a
           path: .ci/goose
           persist-credentials: false
+      - name: Check out goose-doc
+        uses: actions/checkout@v7
+        with:
+          repository: sstadick/goose-doc
+          ref: bb399143866c0c42268f23c8dfda7a447173f93d # v0.3.1, reads root structs
+          path: .ci/goose-doc
+          persist-credentials: false
       - name: Build Goose
         run: |
           cmake -S .ci/goose -B .ci/goose/build -DCMAKE_BUILD_TYPE=Debug -DGOOSE_BUILTIN_LIBS=
@@ -80,9 +87,57 @@ jobs:
               out.write(str(build) + '\n')
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as out:
               out.write('GOOSE_HOME=' + str(Path(os.environ['RUNNER_TEMP']) / 'goose-bio-home') + '\n')
-      # scripts/docs.sh --check and scripts/doctest.sh are not run here yet:
-      # IITree is a root struct, which published goose-doc does not read.
+      - name: Check API reference
+        env:
+          GOOSE_DOC: .ci/goose-doc/main.goose
+        run: scripts/docs.sh --check
+      - name: Run documentation examples
+        env:
+          GOOSE_DOC: .ci/goose-doc/main.goose
+        run: |
+          scripts/doctest.sh
+          read -ra compilers <<< "$NATIVE_COMPILERS"
+          for cc in "${compilers[@]}"; do
+            scripts/doctest.sh --cc "$cc"
+          done
       - name: TinyCC and native tests
         run: |
           read -ra compilers <<< "$NATIVE_COMPILERS"
           python3 tests/run.py --cc "${compilers[@]}"
+      - name: Generate release reference
+        if: matrix.os == 'ubuntu-24.04'
+        env:
+          GOOSE_DOC: .ci/goose-doc/main.goose
+          DOC_OUTPUT: ${{ runner.temp }}/API.md
+        run: scripts/docs.sh --source-url "https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA"
+      - uses: actions/upload-artifact@v7
+        if: matrix.os == 'ubuntu-24.04'
+        with:
+          name: api-reference
+          path: ${{ runner.temp }}/API.md
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: api-reference
+          path: docs
+      - name: Publish source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Expected vMAJOR.MINOR.PATCH"; exit 1; }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" docs/API.md --clobber
+          else
+            gh release create "$TAG" docs/API.md --verify-tag --generate-notes
+          fi
