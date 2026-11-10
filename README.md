@@ -39,8 +39,9 @@ goose build main.goose -O2 -o demo
 | `bio.radix_sort` | `radix_sort` | nothing else |
 | `bio.fastx` | `fastx` | goose-io, goose-bstr, goose-simd |
 
-The examples follow `main`; pin the import to a commit for reproducible
-builds. There is no release yet.
+The examples follow `main`. For reproducible builds, pin the import to a
+[release](https://github.com/sstadick/goose-bio/releases) tag, as in
+`"github.com/sstadick/goose-bio@v0.1.0"`.
 
 ## Implicit interval tree
 
@@ -138,6 +139,12 @@ Regenerate `API.md` with `scripts/docs.sh`. Both documentation scripts use
 [goose-doc](https://github.com/sstadick/goose-doc); set `GOOSE_DOC` when its
 `main.goose` is not at `../goose-doc/main.goose`. The benchmarks are run with
 [pixi](https://pixi.sh) from `bench/`, as their reports describe.
+
+CI runs the tests, the documentation check, and the examples on Linux
+x86-64/ARM64 (GCC and Clang), macOS ARM64 (Clang), and Windows x86-64 (MSVC
+and clang-cl). Pushing a `vMAJOR.MINOR.PATCH` tag publishes a source release
+only after the entire matrix passes, attaching an API reference with
+commit-pinned links.
 
 ## License
 
