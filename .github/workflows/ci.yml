@@ -22,10 +22,10 @@ jobs:
         include:
           - os: ubuntu-24.04
             arch: x86_64
-            compilers: gcc clang
+            compilers: clang
           - os: ubuntu-24.04-arm
             arch: arm64
-            compilers: gcc clang
+            compilers: clang
           - os: macos-15
             arch: arm64
             compilers: clang
@@ -38,6 +38,7 @@ jobs:
     env:
       PYTHONUTF8: '1'
       NATIVE_COMPILERS: ${{ matrix.compilers }}
+      GOOSE_CC: ${{ matrix.os == 'windows-2025' && 'clang-cl' || 'clang' }}
     steps:
       - name: Preserve line endings on Windows
         if: runner.os == 'Windows'
@@ -65,6 +66,9 @@ jobs:
           persist-credentials: false
       - name: Build Goose
         run: |
+          if [[ "$RUNNER_OS" != Windows ]]; then
+            export CC=clang CXX=clang++
+          fi
           cmake -S .ci/goose -B .ci/goose/build -DCMAKE_BUILD_TYPE=Debug -DGOOSE_BUILTIN_LIBS=
           cmake --build .ci/goose/build --config Debug --parallel 2
       - name: Set test environment and check architecture

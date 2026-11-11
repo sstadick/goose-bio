@@ -2,7 +2,7 @@
 
 Bioinformatics data structures and parsers for
 [Goose](https://github.com/aardappel/goose): an implicit interval tree, a
-block-indexed interval lookup, a FASTA and FASTQ reader, and the radix sort
+block-indexed interval lookup, streaming FASTA/FASTQ and indexed FASTA readers, and the radix sort
 both interval structures are built with.
 
 **[API reference and examples](API.md)** · [Benchmarks](bench/BIOFAST.md)
@@ -40,10 +40,11 @@ goose build main.goose -O2 -o demo
 | `bio.lapper` | `lapper` | nothing else |
 | `bio.radix_sort` | `radix_sort` | nothing else |
 | `bio.fastx` | `fastx` | goose-io, goose-bstr, goose-simd |
+| `bio.faidx` | `faidx` | goose-io, goose-bstr, goose-simd |
 
 The examples follow `main`. For reproducible builds, pin the import to a
 [release](https://github.com/sstadick/goose-bio/releases) tag, as in
-`"github.com/sstadick/goose-bio@v0.2.0"`.
+`"github.com/sstadick/goose-bio@v0.3.0"`.
 
 ## Implicit interval tree
 
@@ -136,6 +137,52 @@ fn main() {
 The [biofast benchmarks](bench/BIOFAST.md) compare the interval tree and
 this reader with C, Rust, Zig, and Mojo ports.
 
+## Indexed FASTA
+
+`faidx.goose` reads arbitrary regions from **uncompressed FASTA** using a
+standard five-column `.fai` produced by `samtools faidx reference.fa`.
+It does not build indexes. Gzip/BGZF FASTA (which also needs `.gzi` support)
+and FASTQ indexes are not supported.
+
+```goose
+import std;
+import io from "github.com/sstadick/goose-io@v0.2.2";
+import bstr from "github.com/sstadick/goose-bstr@v0.3.1";
+import simd_bytes from "github.com/sstadick/goose-simd@v0.2.0";
+import bio from "github.com/sstadick/goose-bio@main";
+import bio.faidx;
+
+fn main() {
+    let reader = faidx::Reader { .. };
+    defer reader.close();
+    assert(reader.open("tests/example.fa") == faidx::Status.Ok);
+    var bases: u8[>..] = [];
+    assert(reader.fetch("chr1", 3, 10, bases) == faidx::Status.Ok);
+    assert(bases == "TacgtnR");
+}
+```
+
+Run the example from this checkout, or replace the path and coordinates with
+your reference. `open(path)` uses `path + ".fai"`; pass a second path to use a
+different index location. `reference_id(name)` returns an index-order ID or -1;
+`references[id].length` and `reference_name(id)` expose the reference dictionary.
+An ID overload of `fetch` avoids repeated name lookup in query loops.
+
+Queries are zero-based and half-open, preserve sequence case/IUPAC bytes, and
+remove LF, CRLF or CR line endings. Empty intervals succeed; invalid ranges
+are rejected, not clamped. Output belongs to the caller, reuses its allocation,
+and is cleared on failure. A reader keeps only its index and a **64 KiB read
+cache**, not complete chromosomes; nearby queries can reuse cached bytes.
+Offsets and lengths use signed 64-bit integers. One worker should own one
+reader. Close explicitly; reopening replaces the previous file and index.
+
+The index must match the FASTA, and neither should change while open. Numeric
+overflow, duplicate names and invalid line geometry are rejected; queried
+line separators and truncation are checked. Opening does not scan the entire
+FASTA or verify sequence names against headers, and FAI has no checksum to
+detect every stale index. The tiny native adapter supplies portable 64-bit
+seeking; parsing, buffering and extraction remain Goose code.
+
 ## Radix sort
 
 `radix_sort.goose` provides in-place insertion sort and MSD radix sort for all
@@ -171,7 +218,7 @@ Run the implementation tests and executable documentation from the repository
 root:
 
 ```sh
-python3 tests/run.py --cc gcc clang
+GOOSE_CC=clang python3 tests/run.py --cc clang
 scripts/docs.sh --check
 scripts/doctest.sh
 ```
@@ -183,7 +230,7 @@ Regenerate `API.md` with `scripts/docs.sh`. Both documentation scripts use
 [pixi](https://pixi.sh) from `bench/`, as their reports describe.
 
 CI runs the tests, the documentation check, and the examples on Linux
-x86-64/ARM64 (GCC and Clang), macOS ARM64 (Clang), and Windows x86-64 (MSVC
+x86-64/ARM64 (Clang), macOS ARM64 (Clang), and Windows x86-64 (MSVC
 and clang-cl). Pushing a `vMAJOR.MINOR.PATCH` tag publishes a source release
 only after the entire matrix passes, attaching an API reference with
 commit-pinned links.

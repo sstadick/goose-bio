@@ -23,6 +23,15 @@
 - [`fastx::Status`](#api-19)
 - [`fastx::Reader`](#api-20)
 - [`fastx::read`](#api-21)
+- [`faidx::Status`](#api-22)
+- [`faidx::Reference`](#api-23)
+- [`faidx::Reader`](#api-24)
+- [`faidx::close`](#api-25)
+- [`faidx::open`](#api-26)
+- [`faidx::reference_id`](#api-27)
+- [`faidx::reference_name`](#api-28)
+- [`faidx::fetch`](#api-29)
+- [`faidx::fetch`](#api-30)
 
 <a id="api-1"></a>
 
@@ -588,4 +597,219 @@ defer io::close(reader.stream.file);
 var bases = 0;
 while reader.read() == fastx::Status.Record { bases += reader.seq.len; }
 assert(bases == 12);
+```
+
+<a id="api-22"></a>
+
+## `faidx::Status`
+
+[source](faidx.goose#L22-L22)
+
+```goose
+enum Status { Ok, Closed, IoError, InvalidIndex, UnsupportedFormat, UnknownReference, OutOfRange, Truncated, InvalidData }
+```
+
+Results of opening an index or fetching bases. Queries do not clamp ranges.
+InvalidIndex includes malformed numbers, duplicate names and offset overflow;
+InvalidData means a non-FASTA header or a queried line separator mismatch.
+UnsupportedFormat means gzip/BGZF input; use an uncompressed FASTA instead.
+Errors are not sticky: another query may succeed. A failed fetch clears output.
+
+```goose
+let reader = faidx::Reader { .. };
+var bases: u8[>..] = [];
+assert(reader.fetch("chr1", 0, 1, bases) == faidx::Status.Closed);
+assert(bases.len == 0);
+```
+
+<a id="api-23"></a>
+
+## `faidx::Reference`
+
+[source](faidx.goose#L36-L36)
+
+```goose
+struct Reference { name: i64, name_len: i64, length: i64, offset: i64, line_bases: i64, line_width: i64, next: i64 }
+```
+
+One FAI entry, in index order. length counts bases; offset and line_width
+count file bytes. line_bases excludes the line terminator. name/name_len
+address the reader's name slab; use reference_name to borrow a name.
+Treat all metadata as read-only; next belongs to the name lookup table.
+
+```goose
+let reader = faidx::Reader { .. };
+defer reader.close();
+assert(reader.open("tests/example.fa") == faidx::Status.Ok);
+assert(reader.reference_name(0) == "chr1");
+assert(reader.references[0].length == 13);
+```
+
+<a id="api-24"></a>
+
+## `faidx::Reader`
+
+[source](faidx.goose#L52-L60)
+
+```goose
+root struct Reader {
+    file: io::FileHandle = io::FileHandle { fd: -1 },
+    references: Reference[>..] = [],
+    names: u8[>..] = [],
+    ids: dictionary<u64, i64> = dictionary<u64, i64> {},
+    buffer: u8[65536],
+    buffer_offset: i64 = 0,
+    buffered: i64 = 0,
+}
+```
+
+Owns the FASTA file, parsed index and a 64 KiB read cache. Construct with
+Reader { .. } and close explicitly, normally with defer. No whole sequence
+is loaded on open. Use a separate reader per worker; do not share or copy an
+open reader. Query outputs belong to the caller and survive subsequent queries.
+Implementation fields other than references are not a public mutation API.
+
+```goose
+let reader = faidx::Reader { .. };
+defer reader.close();
+assert(reader.open("tests/example.fa") == faidx::Status.Ok);
+var bases: u8[>..] = [];
+assert(reader.fetch("chr1", 3, 10, bases) == faidx::Status.Ok);
+assert(bases == "TacgtnR");
+```
+
+<a id="api-25"></a>
+
+## `faidx::close`
+
+[source](faidx.goose#L72-L78)
+
+```goose
+fn close(reader: Reader&) -> bool
+```
+
+Close the file and clear the index/cache. Repeated close is safe. Return
+false only if closing the OS handle failed; it is invalidated either way.
+
+```goose
+let reader = faidx::Reader { .. };
+assert(reader.open("tests/example.fa") == faidx::Status.Ok);
+assert(reader.close());
+assert(reader.close());
+assert(reader.references.len == 0);
+```
+
+<a id="api-26"></a>
+
+## `faidx::open`
+
+[source](faidx.goose#L94-L103)
+
+```goose
+fn open(reader: Reader&, path: const u8[:], index_path: const u8[:] = "") -> Status
+```
+
+Open FASTA and an existing index; an omitted index_path means path + ".fai".
+No index is generated or modified. Failure closes the file and clears any
+previous index. Accept LF/CRLF index lines, exactly five tab-separated fields,
+unique nonempty names and nonnegative signed-64-bit values. FASTQ indexes
+and compressed FASTA are unsupported. The index must match the unchanged
+FASTA: FAI has no identity checksum, and open does not scan all sequence data.
+
+```goose
+let reader = faidx::Reader { .. };
+defer reader.close();
+assert(reader.open("tests/example.fa", "tests/example.fa.fai") == faidx::Status.Ok);
+assert(reader.open("") == faidx::Status.IoError);
+assert(reader.references.len == 0);
+```
+
+<a id="api-27"></a>
+
+## `faidx::reference_id`
+
+[source](faidx.goose#L190-L198)
+
+```goose
+fn reference_id(reader: Reader&, name: const u8[:]) -> i64
+```
+
+Look up a reference by its exact FAI name. Return -1 when absent or closed.
+IDs are zero-based index order and remain valid only until close/open.
+
+```goose
+let reader = faidx::Reader { .. };
+defer reader.close();
+assert(reader.open("tests/example.fa") == faidx::Status.Ok);
+assert(reader.reference_id("chr1") == 0);
+assert(reader.reference_id("missing") == -1);
+```
+
+<a id="api-28"></a>
+
+## `faidx::reference_name`
+
+[source](faidx.goose#L209-L212)
+
+```goose
+fn reference_name(reader: const Reader&, id: i64) -> const u8[:]
+```
+
+Borrow the name of an existing reference ID until close/open. id must be
+in [0, references.len). Names are the exact first-column FAI bytes.
+
+```goose
+let reader = faidx::Reader { .. };
+defer reader.close();
+assert(reader.open("tests/example.fa") == faidx::Status.Ok);
+assert(reader.reference_name(1) == "chr2");
+```
+
+<a id="api-29"></a>
+
+## `faidx::fetch`
+
+[source](faidx.goose#L231-L233)
+
+```goose
+fn fetch(reader: Reader&, name: const u8[:], begin: i64, end: i64, output: u8[>..]&) -> Status
+```
+
+Replace output with bases in zero-based [begin, end), preserving case and
+ambiguity codes and removing line endings. Empty intervals, including at
+sequence end, succeed. Negative, reversed or past-end ranges fail rather
+than clamp. Output is cleared on any failure. Its capacity is reused; no
+borrowed sequence views escape. The FASTA must not change while open.
+LF, CRLF and CR sequence lines are supported, as is a final unterminated line.
+
+```goose
+let reader = faidx::Reader { .. };
+defer reader.close();
+assert(reader.open("tests/example.fa") == faidx::Status.Ok);
+var bases: u8[>..] = [];
+assert(reader.fetch("chr1", 3, 10, bases) == faidx::Status.Ok);
+assert(bases == "TacgtnR");
+assert(reader.fetch(0, 13, 13, bases) == faidx::Status.Ok && bases.len == 0);
+assert(reader.fetch(0, 0, 14, bases) == faidx::Status.OutOfRange);
+```
+
+<a id="api-30"></a>
+
+## `faidx::fetch`
+
+[source](faidx.goose#L245-L256)
+
+```goose
+fn fetch(reader: Reader&, id: i64, begin: i64, end: i64, output: u8[>..]&) -> Status
+```
+
+ID overload of fetch; cache reference_id outside a query loop when convenient.
+
+```goose
+let reader = faidx::Reader { .. };
+defer reader.close();
+assert(reader.open("tests/example.fa") == faidx::Status.Ok);
+let id = reader.reference_id("chr2");
+var bases: u8[>..] = [];
+assert(reader.fetch(id, 1, 4, bases) == faidx::Status.Ok && bases == "TGC");
 ```

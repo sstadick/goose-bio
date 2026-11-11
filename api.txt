@@ -16,3 +16,11 @@ fastx::Stream
 fastx::Status
 fastx::Reader
 fastx::read
+faidx::Status
+faidx::Reference
+faidx::Reader
+faidx::open
+faidx::close
+faidx::reference_id
+faidx::reference_name
+faidx::fetch

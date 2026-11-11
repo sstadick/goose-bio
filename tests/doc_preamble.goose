@@ -9,5 +9,6 @@ import bio.radix_sort;
 import bio.iitree;
 import bio.lapper;
 import bio.fastx;
+import bio.faidx;
 
 checkfree fn low_byte(value: u16) -> u16 { value & 0xFF }
