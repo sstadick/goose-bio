@@ -1,6 +1,6 @@
 import std;
 import os;
-import io from "github.com/sstadick/goose-io@v0.2.2";
+import io from "github.com/sstadick/goose-io@c3554678191cd3e1ff04d2c5207ddd526f3535fe";
 import bstr from "github.com/sstadick/goose-bstr@v0.3.1";
 import simd_bytes from "github.com/sstadick/goose-simd@v0.2.0";
 import bio from "..";

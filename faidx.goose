@@ -2,10 +2,8 @@
 namespace faidx;
 import std;
 import dictionary;
-import io from "github.com/sstadick/goose-io@v0.2.2";
+import io from "github.com/sstadick/goose-io@c3554678191cd3e1ff04d2c5207ddd526f3535fe";
 import bstr from "github.com/sstadick/goose-bstr@v0.3.1";
-
-extern fn seek_raw(fd: i32, offset: i64) -> i64 = "goose_bio_faidx_seek";
 
 // Results of opening an index or fetching bases. Queries do not clamp ranges.
 // InvalidIndex includes malformed numbers, duplicate names and offset overflow;
@@ -258,7 +256,7 @@ fn fetch(reader: Reader&, id: i64, begin: i64, end: i64, output: u8[>..]&) -> St
 fn fill(reader: Reader&, offset: i64) -> Status {
     if offset >= reader.buffer_offset && offset - reader.buffer_offset < reader.buffered { return Status.Ok; }
     reader.buffered = 0;
-    if seek_raw(reader.file.fd, offset) != offset { return Status.IoError; }
+    if io::seek(reader.file, offset) != offset { return Status.IoError; }
     let n = io::read(reader.file, reader.buffer);
     if n < 0 { return Status.IoError; }
     if n == 0 { return Status.Truncated; }

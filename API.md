@@ -603,7 +603,7 @@ assert(bases == 12);
 
 ## `faidx::Status`
 
-[source](faidx.goose#L22-L22)
+[source](faidx.goose#L20-L20)
 
 ```goose
 enum Status { Ok, Closed, IoError, InvalidIndex, UnsupportedFormat, UnknownReference, OutOfRange, Truncated, InvalidData }
@@ -626,7 +626,7 @@ assert(bases.len == 0);
 
 ## `faidx::Reference`
 
-[source](faidx.goose#L36-L36)
+[source](faidx.goose#L34-L34)
 
 ```goose
 struct Reference { name: i64, name_len: i64, length: i64, offset: i64, line_bases: i64, line_width: i64, next: i64 }
@@ -649,7 +649,7 @@ assert(reader.references[0].length == 13);
 
 ## `faidx::Reader`
 
-[source](faidx.goose#L52-L60)
+[source](faidx.goose#L50-L58)
 
 ```goose
 root struct Reader {
@@ -682,7 +682,7 @@ assert(bases == "TacgtnR");
 
 ## `faidx::close`
 
-[source](faidx.goose#L72-L78)
+[source](faidx.goose#L70-L76)
 
 ```goose
 fn close(reader: Reader&) -> bool
@@ -703,7 +703,7 @@ assert(reader.references.len == 0);
 
 ## `faidx::open`
 
-[source](faidx.goose#L94-L103)
+[source](faidx.goose#L92-L101)
 
 ```goose
 fn open(reader: Reader&, path: const u8[:], index_path: const u8[:] = "") -> Status
@@ -728,7 +728,7 @@ assert(reader.references.len == 0);
 
 ## `faidx::reference_id`
 
-[source](faidx.goose#L190-L198)
+[source](faidx.goose#L188-L196)
 
 ```goose
 fn reference_id(reader: Reader&, name: const u8[:]) -> i64
@@ -749,7 +749,7 @@ assert(reader.reference_id("missing") == -1);
 
 ## `faidx::reference_name`
 
-[source](faidx.goose#L209-L212)
+[source](faidx.goose#L207-L210)
 
 ```goose
 fn reference_name(reader: const Reader&, id: i64) -> const u8[:]
@@ -769,7 +769,7 @@ assert(reader.reference_name(1) == "chr2");
 
 ## `faidx::fetch`
 
-[source](faidx.goose#L231-L233)
+[source](faidx.goose#L229-L231)
 
 ```goose
 fn fetch(reader: Reader&, name: const u8[:], begin: i64, end: i64, output: u8[>..]&) -> Status
@@ -797,7 +797,7 @@ assert(reader.fetch(0, 0, 14, bases) == faidx::Status.OutOfRange);
 
 ## `faidx::fetch`
 
-[source](faidx.goose#L245-L256)
+[source](faidx.goose#L243-L254)
 
 ```goose
 fn fetch(reader: Reader&, id: i64, begin: i64, end: i64, output: u8[>..]&) -> Status
