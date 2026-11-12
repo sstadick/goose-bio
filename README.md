@@ -153,7 +153,7 @@ import bstr from "github.com/sstadick/goose-bstr@v0.3.1";
 import simd_bytes from "github.com/sstadick/goose-simd@v0.2.0";
 import bio from "github.com/sstadick/goose-bio@main";
 import bio.faidx;
-import bgzf from "github.com/sstadick/goose-bgzf@v0.1.0";
+import bgzf from "github.com/sstadick/goose-bgzf@v0.1.1";
 import deflate from "github.com/sstadick/goose-deflate@v0.1.0";
 
 fn main() {

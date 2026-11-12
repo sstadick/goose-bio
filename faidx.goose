@@ -4,7 +4,7 @@ import std;
 import dictionary;
 import io from "github.com/sstadick/goose-io@v0.3.0";
 import bstr from "github.com/sstadick/goose-bstr@v0.3.1";
-import bgzf from "github.com/sstadick/goose-bgzf@v0.1.0";
+import bgzf from "github.com/sstadick/goose-bgzf@v0.1.1";
 
 // Results of opening an index or fetching bases. Queries do not clamp ranges.
 // InvalidIndex includes malformed numbers, duplicate names and offset overflow;
