@@ -3,6 +3,8 @@ import os;
 import io from "github.com/sstadick/goose-io@v0.3.0";
 import bstr from "github.com/sstadick/goose-bstr@v0.3.1";
 import simd_bytes from "github.com/sstadick/goose-simd@v0.2.0";
+import bgzf from "github.com/sstadick/goose-bgzf@v0.1.0";
+import deflate from "github.com/sstadick/goose-deflate@v0.1.0";
 import bio from "..";
 import bio.faidx;
 
@@ -167,6 +169,60 @@ fn test_many_references() {
     }
 }
 
+fn test_compressed(path: const u8[:]) {
+    let reader = faidx::Reader { .. }; defer reader.close();
+    var out: u8[>..] = []; var expected: u8[>..] = [];
+    for i in 131143 { expected.push("ACgTNrykmBDHV"[(i * 7 + i / 19) % 13]); }
+    assert(reader.open(path) == faidx::Status.Ok);
+    assert(reader.fetch(0, 0, expected.len, out) == faidx::Status.Ok && out == expected);
+    for i in 1000 {
+        let begin = (i * 7919) % (expected.len - 113);
+        assert(reader.fetch("wrapped", begin, begin + 113, out) == faidx::Status.Ok);
+        assert(out == expected[begin..begin + 113]);
+    }
+    assert(reader.fetch("other", 0, 3, out) == faidx::Status.Ok && out == "nRy");
+    assert(reader.fetch(0, 0, 1, out) == faidx::Status.Ok && out == "A");
+    assert(reader.fetch(0, expected.len, expected.len, out) == faidx::Status.Ok && out.len == 0);
+    assert(reader.fetch(0, 0, expected.len + 1, out) == faidx::Status.OutOfRange && out.len == 0);
+    // Ordinary gzip rejection, missing/malformed indexes, and recovery.
+    var gzi: u8[>..] = []; format(gzi, path, ".gzi");
+    var saved: u8[>..] = []; assert(read_file(gzi, saved));
+    assert(delete_file(gzi)); assert(reader.open(path) == faidx::Status.IoError);
+    for malformed in ["", "\x01\0\0\0\0\0\0\0", "\xff\xff\xff\xff\xff\xff\xff\xff"] {
+        let candidate = faidx::Reader { .. }; defer candidate.close();
+        assert(write_file(gzi, malformed));
+        assert(candidate.open(path) == faidx::Status.InvalidIndex);
+        var empty: u8[>..] = [];
+        assert(candidate.fetch(0, 0, 1, empty) == faidx::Status.Closed && empty.len == 0);
+    }
+    var bad: u8[>..] = []; bad.append(saved);
+    for i in 8..16 { bad[i] = 0; } // A repeated compressed block address.
+    assert(write_file(gzi, bad)); assert(reader.open(path) == faidx::Status.InvalidIndex);
+    assert(write_file(gzi, saved));
+    assert(reader.open("tests/example.fa") == faidx::Status.Ok);
+    assert(reader.fetch(0, 0, 2, out) == faidx::Status.Ok && out == "AC");
+    assert(reader.open(path) == faidx::Status.Ok);
+    assert(reader.fetch("other", 1, 3, out) == faidx::Status.Ok && out == "Ry");
+    reader.close();
+    // Corrupt a later block's CRC: open probes only the valid first block.
+    // A failed cross-block query must clear its partial output and allow a
+    // subsequent backward seek to valid data on the same open handle.
+    var original: u8[>..] = []; assert(read_file(path, original));
+    var corrupt: u8[>..] = []; corrupt.append(original);
+    // The fourth fixture block is in sequence data, not the FASTA header.
+    let address = bgzf::le32(saved, 40) as i64;
+    let block_end = address + (bgzf::le32(corrupt, address + 16) & 65535) + 1;
+    corrupt[block_end - 8] ^= 1;
+    assert(write_file(path, corrupt));
+    assert(reader.open(path) == faidx::Status.Ok);
+    assert(reader.fetch(0, 0, expected.len, out) == faidx::Status.InvalidData && out.len == 0);
+    assert(reader.fetch(0, 0, 1, out) == faidx::Status.Ok && out == "A");
+    reader.close();
+    assert(write_file(path, original));
+    assert(reader.open(path) == faidx::Status.Ok);
+    assert(reader.fetch(0, 0, expected.len, out) == faidx::Status.Ok && out == expected);
+}
+
 fn main() {
     test_queries();
     test_wrapping();
@@ -176,7 +232,7 @@ fn main() {
     // The Python runner supplies a sparse fixture beyond 4 GiB. This tests
     // the native seek offset without allocating or reading several GiB.
     let args = args();
-    if args.len == 2 {
+    if args.len >= 2 {
         let reader = faidx::Reader { .. };
         defer reader.close();
         assert(reader.open(args[1]) == faidx::Status.Ok);
@@ -185,5 +241,6 @@ fn main() {
         assert(reader.fetch(0, 1, 8, out) == faidx::Status.Ok && out == "cGTnRYk");
         assert(reader.fetch(0, 0, 1, out) == faidx::Status.Ok && out == "A");
     }
+    if args.len >= 3 { test_compressed(args[2]); }
     print("faidx tests PASSED");
 }

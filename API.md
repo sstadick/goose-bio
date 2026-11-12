@@ -603,7 +603,7 @@ assert(bases == 12);
 
 ## `faidx::Status`
 
-[source](faidx.goose#L20-L20)
+[source](faidx.goose#L21-L21)
 
 ```goose
 enum Status { Ok, Closed, IoError, InvalidIndex, UnsupportedFormat, UnknownReference, OutOfRange, Truncated, InvalidData }
@@ -612,7 +612,7 @@ enum Status { Ok, Closed, IoError, InvalidIndex, UnsupportedFormat, UnknownRefer
 Results of opening an index or fetching bases. Queries do not clamp ranges.
 InvalidIndex includes malformed numbers, duplicate names and offset overflow;
 InvalidData means a non-FASTA header or a queried line separator mismatch.
-UnsupportedFormat means gzip/BGZF input; use an uncompressed FASTA instead.
+UnsupportedFormat means gzip without a decodable BGZF first block.
 Errors are not sticky: another query may succeed. A failed fetch clears output.
 
 ```goose
@@ -626,7 +626,7 @@ assert(bases.len == 0);
 
 ## `faidx::Reference`
 
-[source](faidx.goose#L34-L34)
+[source](faidx.goose#L35-L35)
 
 ```goose
 struct Reference { name: i64, name_len: i64, length: i64, offset: i64, line_bases: i64, line_width: i64, next: i64 }
@@ -649,11 +649,14 @@ assert(reader.references[0].length == 13);
 
 ## `faidx::Reader`
 
-[source](faidx.goose#L50-L58)
+[source](faidx.goose#L53-L64)
 
 ```goose
 root struct Reader {
     file: io::FileHandle = io::FileHandle { fd: -1 },
+    zipped: bgzf::Reader,
+    blocks: BlockOffset[>..] = [],
+    compressed: bool = false,
     references: Reference[>..] = [],
     names: u8[>..] = [],
     ids: dictionary<u64, i64> = dictionary<u64, i64> {},
@@ -682,7 +685,7 @@ assert(bases == "TacgtnR");
 
 ## `faidx::close`
 
-[source](faidx.goose#L70-L76)
+[source](faidx.goose#L76-L87)
 
 ```goose
 fn close(reader: Reader&) -> bool
@@ -703,7 +706,7 @@ assert(reader.references.len == 0);
 
 ## `faidx::open`
 
-[source](faidx.goose#L92-L101)
+[source](faidx.goose#L106-L115)
 
 ```goose
 fn open(reader: Reader&, path: const u8[:], index_path: const u8[:] = "") -> Status
@@ -712,9 +715,12 @@ fn open(reader: Reader&, path: const u8[:], index_path: const u8[:] = "") -> Sta
 Open FASTA and an existing index; an omitted index_path means path + ".fai".
 No index is generated or modified. Failure closes the file and clears any
 previous index. Accept LF/CRLF index lines, exactly five tab-separated fields,
-unique nonempty names and nonnegative signed-64-bit values. FASTQ indexes
-and compressed FASTA are unsupported. The index must match the unchanged
-FASTA: FAI has no identity checksum, and open does not scan all sequence data.
+unique nonempty names and nonnegative signed-64-bit values. BGZF requires
+path + ".gzi"; FAI offsets address decompressed bytes. Ordinary gzip and
+FASTQ indexes are unsupported. GZI entries must have increasing compressed
+offsets and nondecreasing decoded offsets; at most 16,777,216 are accepted.
+Indexes must match the unchanged FASTA: neither has an identity checksum,
+and open does not scan all sequence data.
 
 ```goose
 let reader = faidx::Reader { .. };
@@ -728,7 +734,7 @@ assert(reader.references.len == 0);
 
 ## `faidx::reference_id`
 
-[source](faidx.goose#L188-L196)
+[source](faidx.goose#L238-L246)
 
 ```goose
 fn reference_id(reader: Reader&, name: const u8[:]) -> i64
@@ -749,7 +755,7 @@ assert(reader.reference_id("missing") == -1);
 
 ## `faidx::reference_name`
 
-[source](faidx.goose#L207-L210)
+[source](faidx.goose#L257-L260)
 
 ```goose
 fn reference_name(reader: const Reader&, id: i64) -> const u8[:]
@@ -769,7 +775,7 @@ assert(reader.reference_name(1) == "chr2");
 
 ## `faidx::fetch`
 
-[source](faidx.goose#L229-L231)
+[source](faidx.goose#L279-L281)
 
 ```goose
 fn fetch(reader: Reader&, name: const u8[:], begin: i64, end: i64, output: u8[>..]&) -> Status
@@ -797,7 +803,7 @@ assert(reader.fetch(0, 0, 14, bases) == faidx::Status.OutOfRange);
 
 ## `faidx::fetch`
 
-[source](faidx.goose#L243-L254)
+[source](faidx.goose#L293-L304)
 
 ```goose
 fn fetch(reader: Reader&, id: i64, begin: i64, end: i64, output: u8[>..]&) -> Status

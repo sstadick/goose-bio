@@ -1,14 +1,15 @@
-// Random access to uncompressed FASTA through a standard five-column .fai.
+// Random access to plain or BGZF FASTA through FAI and optional GZI indexes.
 namespace faidx;
 import std;
 import dictionary;
 import io from "github.com/sstadick/goose-io@v0.3.0";
 import bstr from "github.com/sstadick/goose-bstr@v0.3.1";
+import bgzf from "github.com/sstadick/goose-bgzf@v0.1.0";
 
 // Results of opening an index or fetching bases. Queries do not clamp ranges.
 // InvalidIndex includes malformed numbers, duplicate names and offset overflow;
 // InvalidData means a non-FASTA header or a queried line separator mismatch.
-// UnsupportedFormat means gzip/BGZF input; use an uncompressed FASTA instead.
+// UnsupportedFormat means gzip without a decodable BGZF first block.
 // Errors are not sticky: another query may succeed. A failed fetch clears output.
 //
 // ```goose
@@ -33,6 +34,8 @@ enum Status { Ok, Closed, IoError, InvalidIndex, UnsupportedFormat, UnknownRefer
 // ```
 struct Reference { name: i64, name_len: i64, length: i64, offset: i64, line_bases: i64, line_width: i64, next: i64 }
 
+struct BlockOffset { compressed: u64, uncompressed: i64 }
+
 // Owns the FASTA file, parsed index and a 64 KiB read cache. Construct with
 // Reader { .. } and close explicitly, normally with defer. No whole sequence
 // is loaded on open. Use a separate reader per worker; do not share or copy an
@@ -49,6 +52,9 @@ struct Reference { name: i64, name_len: i64, length: i64, offset: i64, line_base
 // ```
 root struct Reader {
     file: io::FileHandle = io::FileHandle { fd: -1 },
+    zipped: bgzf::Reader,
+    blocks: BlockOffset[>..] = [],
+    compressed: bool = false,
     references: Reference[>..] = [],
     names: u8[>..] = [],
     ids: dictionary<u64, i64> = dictionary<u64, i64> {},
@@ -71,16 +77,24 @@ fn close(reader: Reader&) -> bool {
     reader.ids.clear();
     reader.references.clear();
     reader.names.clear();
+    reader.blocks.clear();
+    reader.compressed = false;
     reader.buffered = 0;
-    io::close(reader.file)
+    let plain_ok = io::close(reader.file);
+    let zipped_ok = io::close(reader.zipped.input);
+    reader.zipped.close();
+    plain_ok && zipped_ok
 }
 
 // Open FASTA and an existing index; an omitted index_path means path + ".fai".
 // No index is generated or modified. Failure closes the file and clears any
 // previous index. Accept LF/CRLF index lines, exactly five tab-separated fields,
-// unique nonempty names and nonnegative signed-64-bit values. FASTQ indexes
-// and compressed FASTA are unsupported. The index must match the unchanged
-// FASTA: FAI has no identity checksum, and open does not scan all sequence data.
+// unique nonempty names and nonnegative signed-64-bit values. BGZF requires
+// path + ".gzi"; FAI offsets address decompressed bytes. Ordinary gzip and
+// FASTQ indexes are unsupported. GZI entries must have increasing compressed
+// offsets and nondecreasing decoded offsets; at most 16,777,216 are accepted.
+// Indexes must match the unchanged FASTA: neither has an identity checksum,
+// and open does not scan all sequence data.
 //
 // ```goose
 // let reader = faidx::Reader { .. };
@@ -112,6 +126,35 @@ fn number(bytes: const u8[:]) -> i64, bool {
     return n, true;
 }
 
+fn read_u64(input: io::BufferedReader&) -> u64, bool {
+    var bytes: u8[8] = [0; 8]; var count: i64 = 0;
+    while count < 8 {
+        let n = io::read(input, bytes[count..]); if n <= 0 { return 0, false; } count += n;
+    }
+    return (bgzf::le32(bytes, 0) as u64) | ((bgzf::le32(bytes, 4) as u64) << 32), true;
+}
+
+fn open_gzi(reader: Reader&, path: const u8[:]) -> Status {
+    var filename: u8[>..] = []; format(filename, path, ".gzi");
+    let file, ok = io::open_read(filename); if !ok { return Status.IoError; }
+    let input = io::buffered_reader(file); defer io::close(input);
+    let count, valid = read_u64(input);
+    if !valid || count > 16777216 { return Status.InvalidIndex; }
+    var previous = BlockOffset { compressed: 0, uncompressed: 0 };
+    reader.blocks.push(previous); // GZI omits the first block's (0,0) entry.
+    for i in count as i64 {
+        let compressed, c_ok = read_u64(input); let uncompressed, u_ok = read_u64(input);
+        if !c_ok || !u_ok || compressed <= previous.compressed || compressed > 281474976710655 ||
+            uncompressed > 9223372036854775807 || uncompressed < previous.uncompressed as u64 ||
+            uncompressed - previous.uncompressed as u64 > 65536 { return Status.InvalidIndex; }
+        previous = BlockOffset { compressed: compressed, uncompressed: uncompressed as i64 };
+        reader.blocks.push(previous);
+    }
+    var extra: u8[1] = [0];
+    if io::read(input, extra) != 0 { return Status.InvalidIndex; }
+    Status.Ok
+}
+
 fn open_index(reader: Reader&, path: const u8[:], index_path: const u8[:]) -> Status {
     // Probe without changing the cache; the first query seeks to its FAI offset.
     var magic: u8[2] = [0; 2];
@@ -122,7 +165,14 @@ fn open_index(reader: Reader&, path: const u8[:], index_path: const u8[:]) -> St
         if n == 0 { break; }
         count += n;
     }
-    if count == 2 && magic[0] == 31 && magic[1] == 139 { return Status.UnsupportedFormat; }
+    if count == 2 && magic[0] == 31 && magic[1] == 139 {
+        io::close(reader.file);
+        if reader.zipped.open(path) != bgzf::Status.Ready { return Status.IoError; }
+        let n, status = reader.zipped.read_some(magic[..1]);
+        if status != bgzf::Status.Ready || n != 1 { return Status.UnsupportedFormat; }
+        reader.compressed = true;
+        let indexed = reader.open_gzi(path); if indexed != Status.Ok { return indexed; }
+    }
     if count == 0 || magic[0] != '>' { return Status.InvalidData; }
     var automatic: u8[>..] = [];
     if index_path.len == 0 { automatic.append(path); automatic.append(".fai"); }
@@ -242,7 +292,7 @@ fn fetch(reader: Reader&, name: const u8[:], begin: i64, end: i64, output: u8[>.
 // ```
 fn fetch(reader: Reader&, id: i64, begin: i64, end: i64, output: u8[>..]&) -> Status {
     output.clear();
-    if reader.file.fd < 0 { return Status.Closed; }
+    if reader.file.fd < 0 && reader.zipped.input.fd < 0 { return Status.Closed; }
     if id < 0 || id >= reader.references.len { return Status.UnknownReference; }
     let ref = reader.references[id];
     if begin < 0 || end < begin || end > ref.length { return Status.OutOfRange; }
@@ -256,6 +306,23 @@ fn fetch(reader: Reader&, id: i64, begin: i64, end: i64, output: u8[>..]&) -> St
 fn fill(reader: Reader&, offset: i64) -> Status {
     if offset >= reader.buffer_offset && offset - reader.buffer_offset < reader.buffered { return Status.Ok; }
     reader.buffered = 0;
+    if reader.compressed {
+        var lo: i64 = 0; var hi = reader.blocks.len;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if reader.blocks[mid].uncompressed <= offset { lo = mid + 1; } else { hi = mid; }
+        }
+        let entry = reader.blocks[lo - 1]; let within = offset - entry.uncompressed;
+        if within >= 65536 { return Status.InvalidIndex; }
+        let status = reader.zipped.seek((entry.compressed << 16) | (within as u64));
+        if status != bgzf::Status.Ready {
+            if status == bgzf::Status.IoError { return Status.IoError; }
+            return if status == bgzf::Status.End || status == bgzf::Status.Truncated { Status.Truncated } else { Status.InvalidData };
+        }
+        let n, read_status = reader.zipped.read_some(reader.buffer);
+        if read_status != bgzf::Status.Ready || n == 0 { return Status.Truncated; }
+        reader.buffer_offset = offset; reader.buffered = n; return Status.Ok;
+    }
     if io::seek(reader.file, offset) != offset { return Status.IoError; }
     let n = io::read(reader.file, reader.buffer);
     if n < 0 { return Status.IoError; }

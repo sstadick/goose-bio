@@ -40,7 +40,7 @@ goose build main.goose -O2 -o demo
 | `bio.lapper` | `lapper` | nothing else |
 | `bio.radix_sort` | `radix_sort` | nothing else |
 | `bio.fastx` | `fastx` | goose-io, goose-bstr, goose-simd |
-| `bio.faidx` | `faidx` | goose-io, goose-bstr, goose-simd |
+| `bio.faidx` | `faidx` | goose-io, goose-bstr, goose-simd, goose-bgzf, goose-deflate |
 
 The examples follow `main`. For reproducible builds, pin the import to a
 [release](https://github.com/sstadick/goose-bio/releases) tag, as in
@@ -139,10 +139,12 @@ this reader with C, Rust, Zig, and Mojo ports.
 
 ## Indexed FASTA
 
-`faidx.goose` reads arbitrary regions from **uncompressed FASTA** using a
+`faidx.goose` reads arbitrary regions from **plain or BGZF FASTA** using a
 standard five-column `.fai` produced by `samtools faidx reference.fa`.
-It does not build indexes. Gzip/BGZF FASTA (which also needs `.gzi` support)
-and FASTQ indexes are not supported.
+BGZF also requires `reference.fa.gz.gzi`, mapping decompressed offsets to BGZF
+blocks. It does not build indexes. Ordinary gzip and FASTQ indexes are not
+supported. BGZF uses goose-bgzf/goose-deflate, requiring CMake and a native C
+compiler even for TinyCC execution.
 
 ```goose
 import std;
@@ -151,6 +153,8 @@ import bstr from "github.com/sstadick/goose-bstr@v0.3.1";
 import simd_bytes from "github.com/sstadick/goose-simd@v0.2.0";
 import bio from "github.com/sstadick/goose-bio@main";
 import bio.faidx;
+import bgzf from "github.com/sstadick/goose-bgzf@v0.1.0";
+import deflate from "github.com/sstadick/goose-deflate@v0.1.0";
 
 fn main() {
     let reader = faidx::Reader { .. };
@@ -173,6 +177,9 @@ remove LF, CRLF or CR line endings. Empty intervals succeed; invalid ranges
 are rejected, not clamped. Output belongs to the caller, reuses its allocation,
 and is cleared on failure. A reader keeps only its index and a **64 KiB read
 cache**, not complete chromosomes; nearby queries can reuse cached bytes.
+Compressed input adds BGZF's three 64 KiB buffers and the GZI offset table.
+GZI lookup uses binary search; only addressed blocks are decompressed and CRC
+checked. Backward queries and queries after decoding errors can seek again.
 Offsets and lengths use signed 64-bit integers. One worker should own one
 reader. Close explicitly; reopening replaces the previous file and index.
 
