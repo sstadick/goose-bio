@@ -2,7 +2,7 @@
 namespace faidx;
 import std;
 import dictionary;
-import io from "github.com/sstadick/goose-io@c3554678191cd3e1ff04d2c5207ddd526f3535fe";
+import io from "github.com/sstadick/goose-io@v0.3.0";
 import bstr from "github.com/sstadick/goose-bstr@v0.3.1";
 
 // Results of opening an index or fetching bases. Queries do not clamp ranges.

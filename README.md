@@ -146,7 +146,7 @@ and FASTQ indexes are not supported.
 
 ```goose
 import std;
-import io from "github.com/sstadick/goose-io@v0.2.2";
+import io from "github.com/sstadick/goose-io@v0.3.0";
 import bstr from "github.com/sstadick/goose-bstr@v0.3.1";
 import simd_bytes from "github.com/sstadick/goose-simd@v0.2.0";
 import bio from "github.com/sstadick/goose-bio@main";
