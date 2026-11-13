@@ -44,7 +44,7 @@ goose build main.goose -O2 -o demo
 
 The examples follow `main`. For reproducible builds, pin the import to a
 [release](https://github.com/sstadick/goose-bio/releases) tag, as in
-`"github.com/sstadick/goose-bio@v0.3.0"`.
+`"github.com/sstadick/goose-bio@v0.4.1"`.
 
 ## Implicit interval tree
 
@@ -220,6 +220,11 @@ methodology and current performance.
 documented API and may change or go away.
 
 ## Development
+
+CI pins Goose to `855f1037a5ceee837ef270382ac8d26df47a7139`
+(`v2026.4-24-g855f1037`). Use that revision to reproduce the current checks;
+benchmark reports retain the compiler versions used for their measurements.
+The goose-doc tool remains pinned to `bb399143866c0c42268f23c8dfda7a447173f93d`.
 
 Run the implementation tests and executable documentation from the repository
 root:
