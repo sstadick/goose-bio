@@ -221,10 +221,16 @@ documented API and may change or go away.
 
 ## Development
 
-CI pins Goose to `855f1037a5ceee837ef270382ac8d26df47a7139`
-(`v2026.4-24-g855f1037`). Use that revision to reproduce the current checks;
+CI pins Goose to `4602c98660676b2cb94bc9b06fec8c65b37fce92`
+(`v2026.4-26-g4602c986`). Use that revision to reproduce the current checks;
 benchmark reports retain the compiler versions used for their measurements.
 The goose-doc tool remains pinned to `bb399143866c0c42268f23c8dfda7a447173f93d`.
+
+This compiler checks the code executed by `checkfree` callers, including
+unannotated helpers and callbacks. Sort key functions need not themselves be
+declared `checkfree`, but no bounds check may remain when insertion sort calls
+them. Existing `checkfree` annotations remain useful guarantees; they do not
+disable bounds checks.
 
 Run the implementation tests and executable documentation from the repository
 root:
